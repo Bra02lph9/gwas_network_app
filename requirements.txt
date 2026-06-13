@@ -1,0 +1,6 @@
+pandas
+requests
+networkx
+plotly
+streamlit
+urllib3

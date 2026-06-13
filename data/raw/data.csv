@@ -1,0 +1,37 @@
+snp,gene,disease,p_value
+rs1333049,CDKN2B-AS1,Coronary Artery Disease,1e-20
+rs4977574,CDKN2B-AS1,Coronary Artery Disease,2e-18
+rs10757274,CDKN2B-AS1,Coronary Artery Disease,5e-15
+rs7412,APOE,Coronary Artery Disease,4e-12
+rs429358,APOE,Coronary Artery Disease,2e-25
+rs10455872,LPA,Coronary Artery Disease,3e-30
+rs3798220,LPA,Coronary Artery Disease,1e-22
+rs599839,SORT1,Coronary Artery Disease,5e-15
+rs646776,SORT1,Coronary Artery Disease,8e-13
+rs11206510,PCSK9,Coronary Artery Disease,7e-11
+rs11591147,PCSK9,Coronary Artery Disease,2e-17
+rs17465637,MIA3,Coronary Artery Disease,4e-10
+rs3184504,SH2B3,Coronary Artery Disease,3e-09
+rs9349379,PHACTR1,Coronary Artery Disease,2e-14
+rs2107595,HDAC9,Coronary Artery Disease,1e-10
+rs1746048,CXCL12,Coronary Artery Disease,7e-09
+rs964184,ZNF259,Coronary Artery Disease,3e-12
+rs6511720,LDLR,Coronary Artery Disease,8e-18
+rs688,LDLR,Coronary Artery Disease,2e-08
+rs651007,ABO,Coronary Artery Disease,5e-13
+rs579459,ABO,Coronary Artery Disease,1e-11
+rs1800562,HFE,Coronary Artery Disease,9e-09
+rs9939609,FTO,Obesity,1e-40
+rs1421085,FTO,Obesity,4e-35
+rs17782313,MC4R,Obesity,2e-20
+rs10938397,GNPDA2,Obesity,6e-18
+rs2815752,NEGR1,Obesity,5e-17
+rs7566605,INSIG2,Obesity,8e-11
+rs7903146,TCF7L2,Type 2 Diabetes,1e-50
+rs12255372,TCF7L2,Type 2 Diabetes,3e-42
+rs1801282,PPARG,Type 2 Diabetes,5e-20
+rs5219,KCNJ11,Type 2 Diabetes,2e-15
+rs13266634,SLC30A8,Type 2 Diabetes,8e-25
+rs4402960,IGF2BP2,Type 2 Diabetes,9e-18
+rs1111875,HHEX,Type 2 Diabetes,4e-16
+rs10811661,CDKN2A,Type 2 Diabetes,7e-14
