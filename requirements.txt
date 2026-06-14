@@ -4,3 +4,4 @@ networkx
 plotly
 streamlit
 urllib3
+groq

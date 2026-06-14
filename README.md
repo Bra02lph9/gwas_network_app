@@ -213,6 +213,7 @@ networkx
 plotly
 requests
 urllib3
+groq
 ```
 
 ---
@@ -236,12 +237,41 @@ Planned features:
 - Gene Ontology Enrichment
 - Reactome Integration
 
-## AI Integration
+## AI Integration (Groq)
 
-- Automatic biological interpretation
-- Gene function summaries
-- Disease mechanism explanations
-- Network insight generation
+Optional AI features powered by Groq-fast Llama 3.3 inference. Activates only
+when a Groq API key is provided.
+
+### Setup
+
+1. Get a free key at [console.groq.com](https://console.groq.com).
+2. **Easiest:** paste it into the sidebar → "AI interpretation (Groq)".
+3. **Alternative:** add it to `.streamlit/secrets.toml`:
+   ```toml
+   GROQ_API_KEY = "gsk_..."
+   ```
+4. Optional: override the default model in the same secrets file:
+   ```toml
+   GROQ_MODEL = "llama-3.3-70b-versatile"
+   GROQ_MODEL_FAST = "llama-3.1-8b-instant"
+   ```
+
+### Features
+
+The AI section appears below the 3D network, as four tabs:
+
+- **🧠 Interpret network** — a 4–6 paragraph plain-English narrative of the
+  network shape, hub biology, and caveats.
+- **🧬 Explain a gene** — pick a hub gene (or type any symbol) and get a
+  2–3 paragraph explainer grounded in the network.
+- **💬 Ask the network** — free-form chat grounded in the network stats.
+- **📄 Generate report** — produces a downloadable markdown report.
+
+### Important disclaimer
+
+The LLM may invent specific gene/variant functions. Treat its output as a
+**first draft** and verify any non-trivial claim against NCBI Gene, Ensembl,
+UniProt, or OpenTargets. Do not use the output for clinical decisions.
 
 ## Export Options
 
