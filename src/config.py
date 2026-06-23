@@ -1,8 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
+import streamlit as st
 
-
-# PROJECT PATHS
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -19,9 +18,6 @@ EXPORTS_DIR = RESULTS_DIR / "exports"
 
 CACHE_DIR = BASE_DIR / "cache"
 
-
-# GWAS SETTINGS
-
 GWAS_API_BASE_URL = "https://www.ebi.ac.uk/gwas/rest/api"
 
 DEFAULT_PVALUE_THRESHOLD = 5e-8
@@ -32,9 +28,6 @@ DEFAULT_TOP_ROWS = 500
 
 DEFAULT_MIN_SNPS_PER_GENE = 2
 
-
-# NETWORK SETTINGS
-
 DEFAULT_LAYOUT_SEED = 42
 
 DEFAULT_LAYOUT_ITERATIONS = 80
@@ -43,9 +36,10 @@ DEFAULT_MAX_NODE_SIZE = 35
 
 DEFAULT_MIN_NODE_SIZE = 5
 
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
+GROQ_MODEL = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL_FAST = st.secrets.get("GROQ_MODEL_FAST", "llama-3.1-8b-instant")
 
-
-# VISUALIZATION SETTINGS
 
 NODE_COLORS = {
     "variant": "#4E79A7",
@@ -61,7 +55,6 @@ NODE_SIZES = {
     "unknown": 6,
 }
 
-# DIRECTORIES
 
 DIRECTORIES = [
     DATA_DIR,
@@ -77,9 +70,6 @@ DIRECTORIES = [
 
 
 def create_directories() -> None:
-    """
-    Create all required project directories.
-    """
 
     for directory in DIRECTORIES:
         directory.mkdir(

@@ -34,7 +34,6 @@ def _create_session() -> requests.Session:
     )
 
     adapter = HTTPAdapter(max_retries=retries)
-
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
@@ -54,6 +53,7 @@ SESSION = _create_session()
 def _get_json(
     url: str,
     params: dict[str, Any] | None = None,
+    debug: bool = False,
 ) -> dict[str, Any]:
     try:
         response = SESSION.get(
@@ -65,6 +65,11 @@ def _get_json(
         raise RuntimeError(
             f"GWAS Catalog API connection error: {exc}"
         ) from exc
+
+    if debug:
+        print("REQUEST URL:", response.url)
+        print("STATUS:", response.status_code)
+        print("TEXT:", response.text[:500])
 
     if response.status_code != 200:
         raise RuntimeError(
@@ -88,13 +93,12 @@ def _extract_associations_from_response(
     if not isinstance(embedded, dict):
         return []
 
-    possible_keys = [
+    for key in [
         "associations",
-        "associationDtoes",
         "associationDtos",
-    ]
-
-    for key in possible_keys:
+        "associationDtoes",
+        "associationDTOs",
+    ]:
         value = embedded.get(key)
         if isinstance(value, list):
             return value
@@ -102,49 +106,19 @@ def _extract_associations_from_response(
     return []
 
 
-def _trait_matches_association(
-    association: dict[str, Any],
-    trait: str,
-) -> bool:
-    trait_lower = trait.lower().strip()
-
-    searchable_parts: list[str] = []
-
-    for key in [
-        "trait",
-        "diseaseTrait",
-        "reportedTrait",
-        "mappedTrait",
-    ]:
-        value = association.get(key)
-        if value:
-            searchable_parts.append(str(value))
-
-    efo_traits = association.get("efoTraits", [])
-
-    if isinstance(efo_traits, list):
-        for item in efo_traits:
-            if isinstance(item, dict):
-                searchable_parts.extend(
-                    str(value)
-                    for value in item.values()
-                    if value
-                )
-            elif isinstance(item, str):
-                searchable_parts.append(item)
-
-    searchable_text = " ".join(searchable_parts).lower()
-
-    return trait_lower in searchable_text
-
-
 def fetch_associations_by_trait(
     trait: str,
     max_pages: int = 5,
     page_size: int = 100,
+    debug: bool = False,
 ) -> pd.DataFrame:
     """
-    Fetch raw GWAS Catalog associations using REST API v2.
+    Fetch GWAS Catalog associations using REST API v2.
+
+    The v2 endpoint supports filters such as:
+    - efo_trait
+    - mapped_gene
+    - rs_id
     """
 
     trait = trait.strip()
@@ -160,163 +134,222 @@ def fetch_associations_by_trait(
         data = _get_json(
             url,
             params={
-                "efo_trait": trait,
+                "disease_trait": trait,
                 "page": page,
                 "size": page_size,
             },
+            debug=debug,
         )
 
-        associations = data.get("_embedded", {}).get("associations", [])
+        associations = _extract_associations_from_response(data)
 
         if not associations:
             break
 
         records.extend(associations)
-
         time.sleep(0.05)
 
     return pd.DataFrame(records)
 
 
-def _split_gene_string(
-    value: str,
-) -> list[str]:
+def _split_gene_string(value: str) -> list[str]:
     value = (
         value.replace(" - ", ",")
         .replace(";", ",")
         .replace("/", ",")
+        .replace("|", ",")
     )
 
-    genes = [
-        gene.strip()
+    return [
+        gene.strip().upper()
         for gene in value.split(",")
         if gene.strip()
     ]
 
-    return genes
+
+def _clean_gene_name(gene: Any) -> str | None:
+    if gene is None:
+        return None
+
+    gene = str(gene).strip().upper()
+
+    if not gene:
+        return None
+
+    if gene.lower() in {"none", "null", "nan", "nr"}:
+        return None
+
+    return gene
 
 
-def _extract_gene_names_from_locus(
-    locus: dict[str, Any],
-) -> list[str]:
+def _extract_genes_from_any(value: Any) -> list[str]:
     genes: list[str] = []
 
-    for key in [
-        "authorReportedGenes",
-        "mappedGenes",
-        "gene",
-        "genes",
-    ]:
-        values = locus.get(key, [])
+    if value is None:
+        return genes
 
-        if isinstance(values, list):
-            for item in values:
-                if isinstance(item, dict):
-                    gene = (
-                        item.get("geneName")
-                        or item.get("ensemblGeneName")
-                        or item.get("geneSymbol")
-                        or item.get("symbol")
-                    )
+    if isinstance(value, str):
+        genes.extend(_split_gene_string(value))
 
-                    if gene:
-                        genes.append(str(gene).strip())
+    elif isinstance(value, list):
+        for item in value:
+            genes.extend(_extract_genes_from_any(item))
 
-                elif isinstance(item, str):
-                    genes.extend(
-                        _split_gene_string(item)
-                    )
+    elif isinstance(value, dict):
+        for key in [
+            "geneName",
+            "ensemblGeneName",
+            "geneSymbol",
+            "symbol",
+            "mappedGene",
+            "mappedGenes",
+            "authorReportedGene",
+            "authorReportedGenes",
+            "gene",
+            "genes",
+        ]:
+            if key in value:
+                genes.extend(_extract_genes_from_any(value.get(key)))
 
-        elif isinstance(values, str):
-            genes.extend(
-                _split_gene_string(values)
-            )
-
-    clean_genes = sorted(
+    clean = sorted(
         {
-            gene.upper()
-            for gene in genes
-            if gene and gene.lower() not in {"none", "null", "nan"}
+            gene
+            for gene in (_clean_gene_name(g) for g in genes)
+            if gene is not None
         }
     )
 
-    return clean_genes or ["UNKNOWN_GENE"]
+    return clean
 
 
-def _extract_risk_alleles_from_locus(
-    locus: dict[str, Any],
-) -> list[str]:
-    risk_alleles: list[str] = []
+def _extract_snps_from_any(value: Any) -> list[tuple[str, str]]:
+    """
+    Return list of (rsid, risk_allele).
+    """
 
-    values = locus.get("strongestRiskAlleles", [])
+    snps: list[tuple[str, str]] = []
 
-    if isinstance(values, list):
-        for item in values:
-            if isinstance(item, dict):
-                value = (
-                    item.get("riskAlleleName")
-                    or item.get("variantName")
-                    or item.get("snp")
-                )
+    if value is None:
+        return snps
 
-                if value:
-                    risk_alleles.append(str(value).strip())
+    if isinstance(value, str):
+        rs_id = value.split("-")[0].strip()
+        if rs_id.startswith("rs"):
+            snps.append((rs_id, value.strip()))
 
-            elif isinstance(item, str):
-                risk_alleles.append(item.strip())
+    elif isinstance(value, list):
+        for item in value:
+            snps.extend(_extract_snps_from_any(item))
 
-    return risk_alleles
+    elif isinstance(value, dict):
+        rs_id = (
+            value.get("rs_id")
+            or value.get("rsId")
+            or value.get("rsid")
+            or value.get("variantId")
+            or value.get("variantName")
+            or value.get("snp")
+        )
+
+        risk_allele = (
+            value.get("riskAlleleName")
+            or value.get("snp_effect_allele")
+            or value.get("effect_allele")
+            or value.get("riskAllele")
+            or rs_id
+        )
+
+        if rs_id:
+            rs_id_clean = str(rs_id).split("-")[0].strip()
+            if rs_id_clean.startswith("rs"):
+                snps.append((rs_id_clean, str(risk_allele).strip()))
+
+        for key in [
+            "strongestRiskAlleles",
+            "snp_allele",
+            "snp_effect_allele",
+            "riskAlleles",
+            "variants",
+        ]:
+            if key in value:
+                snps.extend(_extract_snps_from_any(value.get(key)))
+
+    unique: dict[str, str] = {}
+    for rs_id, risk_allele in snps:
+        unique.setdefault(rs_id, risk_allele)
+
+    return sorted(unique.items())
 
 
-def _extract_snps_from_locus(
-    locus: dict[str, Any],
-) -> list[str]:
-    snps: list[str] = []
-
-    risk_alleles = _extract_risk_alleles_from_locus(locus)
-
-    for risk_allele in risk_alleles:
-        snp = str(risk_allele).split("-")[0].strip()
-
-        if snp.startswith("rs"):
-            snps.append(snp)
-
-    for key in [
-        "variantId",
-        "variantName",
-        "snp",
-        "rsId",
-        "rsid",
-    ]:
-        value = locus.get(key)
-
-        if isinstance(value, str):
-            snp = value.split("-")[0].strip()
-
-            if snp.startswith("rs"):
-                snps.append(snp)
-
-    return sorted(set(snps))
-
-
-def _get_association_pvalue(
-    association: dict[str, Any],
+def _get_first_value(
+    data: dict[str, Any],
+    keys: list[str],
 ) -> Any:
-    return (
-        association.get("pvalue")
-        or association.get("pValue")
-        or association.get("p_value")
+    for key in keys:
+        value = data.get(key)
+        if value not in [None, "", [], {}]:
+            return value
+    return None
+
+
+def _get_association_pvalue(association: dict[str, Any]) -> Any:
+    return _get_first_value(
+        association,
+        [
+            "p_value",
+            "pvalue",
+            "pValue",
+            "p-value",
+        ],
     )
 
 
-def _get_association_id(
-    association: dict[str, Any],
-) -> Any:
-    return (
-        association.get("associationId")
-        or association.get("accessionId")
-        or association.get("id")
+def _get_association_id(association: dict[str, Any]) -> Any:
+    return _get_first_value(
+        association,
+        [
+            "association_id",
+            "associationId",
+            "accessionId",
+            "id",
+        ],
     )
+
+
+def _get_association_trait(
+    association: dict[str, Any],
+    fallback_trait: str,
+) -> str:
+    value = _get_first_value(
+        association,
+        [
+            "disease_trait",
+            "diseaseTrait",
+            "trait",
+            "reportedTrait",
+            "mappedTrait",
+        ],
+    )
+
+    if value:
+        return str(value)
+
+    efo_traits = association.get("efoTraits")
+    if isinstance(efo_traits, list) and efo_traits:
+        first = efo_traits[0]
+        if isinstance(first, dict):
+            label = (
+                first.get("trait")
+                or first.get("shortForm")
+                or first.get("label")
+                or first.get("efoTrait")
+            )
+            if label:
+                return str(label)
+        elif isinstance(first, str):
+            return first
+
+    return fallback_trait
 
 
 def extract_gwas_network_table(
@@ -327,7 +360,7 @@ def extract_gwas_network_table(
     Convert GWAS Catalog API v2 associations into clean graph table.
     """
 
-    if associations_df.empty:
+    if associations_df is None or associations_df.empty:
         return pd.DataFrame(columns=NETWORK_COLUMNS)
 
     rows: list[dict[str, Any]] = []
@@ -335,53 +368,53 @@ def extract_gwas_network_table(
     for _, association in associations_df.iterrows():
         association_dict = association.to_dict()
 
-        association_id = association_dict.get("association_id")
-        p_value = association_dict.get("p_value")
+        association_id = _get_association_id(association_dict)
+        p_value = _get_association_pvalue(association_dict)
+        disease = _get_association_trait(association_dict, disease_name)
 
-        mapped_genes = association_dict.get("mapped_genes", [])
-        snp_allele = association_dict.get("snp_allele", [])
-        snp_effect_allele = association_dict.get("snp_effect_allele", [])
+        genes: list[str] = []
+        snps: list[tuple[str, str]] = []
 
-        if not isinstance(mapped_genes, list):
-            mapped_genes = []
+        for key in [
+            "mapped_genes",
+            "mappedGenes",
+            "authorReportedGenes",
+            "author_reported_genes",
+            "gene",
+            "genes",
+        ]:
+            genes.extend(_extract_genes_from_any(association_dict.get(key)))
 
-        if not isinstance(snp_allele, list):
-            snp_allele = []
+        for key in [
+            "snp_allele",
+            "snp_effect_allele",
+            "strongestRiskAlleles",
+            "riskAlleles",
+            "loci",
+            "variant",
+            "variants",
+            "rs_id",
+            "rsId",
+            "rsid",
+        ]:
+            snps.extend(_extract_snps_from_any(association_dict.get(key)))
 
-        snps = []
+        genes = sorted(set(genes))
 
-        for item in snp_allele:
-            if isinstance(item, dict):
-                rs_id = item.get("rs_id")
-                effect_allele = item.get("effect_allele")
+        unique_snps: dict[str, str] = {}
+        for rs_id, risk_allele in snps:
+            unique_snps.setdefault(rs_id, risk_allele)
 
-                if rs_id:
-                    risk_allele = (
-                        f"{rs_id}-{effect_allele}"
-                        if effect_allele
-                        else rs_id
-                    )
-                    snps.append((rs_id, risk_allele))
+        if not genes or not unique_snps or p_value is None:
+            continue
 
-        if not snps and isinstance(snp_effect_allele, list):
-            for allele in snp_effect_allele:
-                if isinstance(allele, str):
-                    rs_id = allele.split("-")[0]
-                    if rs_id.startswith("rs"):
-                        snps.append((rs_id, allele))
-
-        for gene in mapped_genes:
-            gene = str(gene).strip().upper()
-
-            if not gene:
-                continue
-
-            for snp, risk_allele in snps:
+        for gene in genes:
+            for snp, risk_allele in unique_snps.items():
                 rows.append(
                     {
                         "snp": snp,
                         "gene": gene,
-                        "disease": disease_name,
+                        "disease": disease,
                         "p_value": p_value,
                         "risk_allele": risk_allele,
                         "association_id": association_id,
@@ -395,37 +428,33 @@ def extract_gwas_network_table(
 
     df["p_value"] = pd.to_numeric(df["p_value"], errors="coerce")
 
-    df = df.dropna(subset=["snp", "gene", "p_value"])
+    df = df.dropna(subset=["snp", "gene", "disease", "p_value"])
     df = df[df["p_value"] > 0]
+    df = df[df["p_value"] <= 1]
     df = df[df["snp"].astype(str).str.startswith("rs")]
+    df = df[df["gene"].astype(str).str.upper() != "UNKNOWN_GENE"]
 
-    return df.drop_duplicates().reset_index(drop=True)
+    return (
+        df.drop_duplicates()
+        .sort_values("p_value", ascending=True)
+        .reset_index(drop=True)
+    )
 
 
 def filter_significant_associations(
     df: pd.DataFrame,
     pvalue_threshold: float = 5e-8,
 ) -> pd.DataFrame:
-    """
-    Keep only associations below the selected p-value threshold.
-    """
-
     if df.empty:
         return df
 
     df = df.copy()
-
-    df["p_value"] = pd.to_numeric(
-        df["p_value"],
-        errors="coerce",
-    )
-
-    df = df.dropna(
-        subset=["p_value"]
-    )
+    df["p_value"] = pd.to_numeric(df["p_value"], errors="coerce")
+    df = df.dropna(subset=["p_value"])
 
     return (
         df[df["p_value"] <= pvalue_threshold]
+        .sort_values("p_value", ascending=True)
         .reset_index(drop=True)
     )
 
@@ -435,22 +464,40 @@ def fetch_clean_gwas_network_data(
     max_pages: int = 5,
     pvalue_threshold: float | None = 5e-8,
     use_demo_if_empty: bool = False,
+    debug: bool = False,
 ) -> pd.DataFrame:
     """
-    Main function used by the Streamlit app.
+    Main function used by Streamlit app.
 
-    trait -> raw GWAS associations -> clean network table.
+    trait -> raw GWAS associations -> clean SNP-Gene-Disease table.
     """
 
     raw_df = fetch_associations_by_trait(
         trait=trait,
         max_pages=max_pages,
+        debug=debug,
     )
+
+    if debug:
+        print("RAW API rows:", raw_df.shape)
+        print("RAW API columns:", raw_df.columns.tolist())
+        if not raw_df.empty:
+            print("FIRST RAW ROW:")
+            print(raw_df.iloc[0].to_dict())
 
     clean_df = extract_gwas_network_table(
         associations_df=raw_df,
         disease_name=trait,
     )
+
+    if debug:
+        print("CLEAN rows before p-value filter:", clean_df.shape)
+        if not clean_df.empty:
+            print("Min p-value:", clean_df["p_value"].min())
+            print("Max p-value:", clean_df["p_value"].max())
+            print("Rows <= 5e-8:", (clean_df["p_value"] <= 5e-8).sum())
+            print("Rows <= 1e-5:", (clean_df["p_value"] <= 1e-5).sum())
+            print("Rows <= 1e-3:", (clean_df["p_value"] <= 1e-3).sum())
 
     if pvalue_threshold is not None:
         clean_df = filter_significant_associations(
@@ -488,9 +535,10 @@ if __name__ == "__main__":
     df = fetch_clean_gwas_network_data(
         trait="coronary artery disease",
         max_pages=5,
-        pvalue_threshold=5e-8,
+        pvalue_threshold=1e-5,
         use_demo_if_empty=False,
+        debug=True,
     )
 
-    print(df.shape)
+    print("FINAL:", df.shape)
     print(df.head())

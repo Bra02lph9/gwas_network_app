@@ -14,18 +14,21 @@ NODE_COLORS = {
 }
 
 NODE_SIZES = {
-    "variant": 5,
-    "gene": 10,
+    "variant": 6,
+    "gene": 11,
     "disease": 16,
     "unknown": 6,
 }
 
+NODE_SYMBOLS = {
+    "variant": "circle",
+    "gene": "diamond",
+    "disease": "square",
+    "unknown": "circle",
+}
+
 
 def _safe_log_pvalue(p_value: float | None) -> float:
-    """
-    Convert p-value to -log10(p-value).
-    """
-
     if p_value is None:
         return 0.0
 
@@ -41,10 +44,6 @@ def _safe_log_pvalue(p_value: float | None) -> float:
 
 
 def _get_edge_width(best_p_value: float | None) -> float:
-    """
-    Make stronger associations visually thicker.
-    """
-
     log_p = _safe_log_pvalue(best_p_value)
 
     if log_p >= 50:
@@ -59,12 +58,19 @@ def _get_edge_width(best_p_value: float | None) -> float:
     return 1.0
 
 
+def _format_pvalue(p_value: float | None) -> str:
+    try:
+        return f"{float(p_value):.2e}"
+    except (TypeError, ValueError):
+        return "NA"
+
+
 def create_3d_network_figure(G: nx.Graph) -> go.Figure:
     """
     Create an interactive 3D Plotly graph from a NetworkX graph.
     """
 
-    if G.number_of_nodes() == 0:
+    if G is None or G.number_of_nodes() == 0:
         fig = go.Figure()
         fig.update_layout(
             title="Empty network",
@@ -72,17 +78,15 @@ def create_3d_network_figure(G: nx.Graph) -> go.Figure:
         )
         return fig
 
-    k_value = 0.8
-
-    if G.number_of_nodes() > 300:
-        k_value = 1.2
+    k_value = 1.2 if G.number_of_nodes() > 300 else 0.8
 
     pos = nx.spring_layout(
         G,
         dim=3,
         seed=42,
         k=k_value,
-        iterations=80,
+        iterations=100,
+        weight="weight",
     )
 
     edge_traces = []
@@ -95,27 +99,30 @@ def create_3d_network_figure(G: nx.Graph) -> go.Figure:
         relation = data.get("relation", "unknown")
         weight = data.get("weight", 1)
 
-        edge_width = _get_edge_width(best_p_value)
-
         edge_trace = go.Scatter3d(
             x=[x0, x1, None],
             y=[y0, y1, None],
             z=[z0, z1, None],
             mode="lines",
             line=dict(
-                width=edge_width,
-                color="rgba(160,160,160,0.35)",
+                width=_get_edge_width(best_p_value),
+                color="rgba(150,150,150,0.35)",
             ),
             hoverinfo="text",
             text=(
+                f"<b>Edge</b><br>"
+                f"Source: {source}<br>"
+                f"Target: {target}<br>"
                 f"Relation: {relation}<br>"
                 f"Weight: {weight}<br>"
-                f"Best p-value: {best_p_value}"
+                f"Best p-value: {_format_pvalue(best_p_value)}"
             ),
             showlegend=False,
         )
 
         edge_traces.append(edge_trace)
+
+    degrees = dict(G.degree())
 
     node_x = []
     node_y = []
@@ -125,35 +132,22 @@ def create_3d_network_figure(G: nx.Graph) -> go.Figure:
     node_size = []
     node_symbol = []
 
-    degrees = dict(G.degree())
-
     for node, data in G.nodes(data=True):
         x, y, z = pos[node]
 
         node_type = data.get("node_type", "unknown")
         degree = degrees.get(node, 0)
 
+        base_size = NODE_SIZES.get(node_type, NODE_SIZES["unknown"])
+        final_size = min(base_size + degree * 0.7, 38)
+
         node_x.append(x)
         node_y.append(y)
         node_z.append(z)
 
-        node_color.append(
-            NODE_COLORS.get(node_type, NODE_COLORS["unknown"])
-        )
-
-        size = NODE_SIZES.get(node_type, NODE_SIZES["unknown"]) + degree * 0.6
-        node_size.append(min(size, 35))
-
-        if node_type == "variant":
-            symbol = "circle"
-        elif node_type == "gene":
-            symbol = "diamond"
-        elif node_type == "disease":
-            symbol = "square"
-        else:
-            symbol = "circle"
-
-        node_symbol.append(symbol)
+        node_color.append(NODE_COLORS.get(node_type, NODE_COLORS["unknown"]))
+        node_size.append(final_size)
+        node_symbol.append(NODE_SYMBOLS.get(node_type, NODE_SYMBOLS["unknown"]))
 
         node_text.append(
             f"<b>{node}</b><br>"
@@ -172,47 +166,67 @@ def create_3d_network_figure(G: nx.Graph) -> go.Figure:
             size=node_size,
             color=node_color,
             symbol=node_symbol,
-            opacity=0.92,
+            opacity=0.93,
             line=dict(
-                width=0.7,
+                width=0.8,
                 color="white",
             ),
         ),
         showlegend=False,
     )
 
+    legend_traces = [
+        go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(
+                size=10,
+                color=color,
+                symbol=NODE_SYMBOLS[node_type],
+            ),
+            name=node_type.capitalize(),
+        )
+        for node_type, color in NODE_COLORS.items()
+        if node_type != "unknown"
+    ]
+
     fig = go.Figure(
-        data=edge_traces + [node_trace]
+        data=edge_traces + [node_trace] + legend_traces
     )
 
     fig.update_layout(
         title="3D Variant–Gene–Disease Network",
         height=780,
-        margin=dict(
-            l=0,
-            r=0,
-            b=0,
-            t=45,
+        margin=dict(l=0, r=0, b=0, t=45),
+        showlegend=True,
+        legend=dict(
+            x=0.02,
+            y=0.98,
+            bgcolor="rgba(0,0,0,0)",
         ),
-        showlegend=False,
         scene=dict(
             xaxis=dict(
                 showbackground=False,
                 showgrid=False,
                 showticklabels=False,
                 title="",
+                zeroline=False,
             ),
             yaxis=dict(
                 showbackground=False,
                 showgrid=False,
                 showticklabels=False,
                 title="",
+                zeroline=False,
             ),
             zaxis=dict(
                 showbackground=False,
                 showgrid=False,
                 showticklabels=False,
                 title="",
+                zeroline=False,
             ),
         ),
     )
