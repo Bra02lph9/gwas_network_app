@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import pandas as pd
 import streamlit as st
 
 from src.config import create_directories, GROQ_API_KEY
@@ -214,13 +212,6 @@ def render_sidebar() -> dict:
         value=300,
         step=50,
     )
-
-    st.sidebar.header("AI status")
-
-    if GROQ_API_KEY:
-        st.sidebar.success("Groq AI enabled from config/secrets.")
-    else:
-        st.sidebar.warning("Groq API key not found in secrets.")
 
     build_clicked = st.sidebar.button(
         "Build 3D network",
