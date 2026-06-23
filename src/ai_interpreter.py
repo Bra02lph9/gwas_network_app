@@ -420,6 +420,6 @@ def check_ai_available() -> tuple[bool, str]:
             key = ""
 
     if not key:
-        return False, "No Groq API key found in secrets or sidebar."
+        return False, "No Groq API key found in secrets or sidebar"
 
     return True, "ok"
