@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
-from src.config import create_directories
+from src.config import create_directories, get_groq_api_key
 from src.gwas_fetcher import fetch_clean_gwas_network_data
 from src.data_loader import (
     read_uploaded_file,
@@ -32,6 +33,81 @@ st.title("GWAS 3D Variant–Gene–Disease Network Explorer")
 st.caption(
     "Interactive 3D visualization of variant–gene–disease networks from GWAS data."
 )
+
+# ---------------------------------------------------------------------------
+# Floating AI assistant
+#
+# The popover button itself is the floating robot button. We don't try to
+# inject a separate toolbar button and then trigger the popover — that is
+# fragile across Streamlit versions because the popover DOM contract changes.
+# Instead we render the popover inline and style its trigger button to be
+# fixed-positioned at the bottom-right of the viewport, so it floats over
+# the rest of the content. The Groq API key is configured in `src/config.py`
+# (or via the GROQ_API_KEY env var) — never typed into the web app.
+# ---------------------------------------------------------------------------
+
+# Inject CSS once to:
+#   1. Make the popover trigger button a fixed-position floating robot button.
+#   2. Ensure the popover body sits on top of everything.
+# We use components.html() because st.markdown() strips <script>/<style>
+# tags, but the iframe can reach the parent document via window.parent —
+# the standard Streamlit trick.
+if "ai_floating_style_injected" not in st.session_state:
+    st.session_state["ai_floating_style_injected"] = True
+    components.html(
+        """
+        <script>
+        (function () {
+            var p = window.parent.document;
+
+            if (p.getElementById('st-ai-floating-style')) return;
+
+            var style = p.createElement('style');
+            style.id = 'st-ai-floating-style';
+            style.textContent = `
+                /* Floating AI popover trigger — fixed bottom-right */
+                button[data-testid="stPopoverButton"][kind="primary"],
+                button[data-testid="stPopoverButton"] {
+                    position: fixed !important;
+                    bottom: 24px !important;
+                    right: 24px !important;
+                    z-index: 99999 !important;
+                    width: 60px !important;
+                    height: 60px !important;
+                    border-radius: 50% !important;
+                    border: none !important;
+                    cursor: pointer !important;
+                    font-size: 28px !important;
+                    line-height: 1 !important;
+                    padding: 0 !important;
+                    background: linear-gradient(135deg,#4E79A7 0%,#59A14F 100%) !important;
+                    color: #fff !important;
+                    box-shadow: 0 6px 18px rgba(0,0,0,.30) !important;
+                    transition: transform .15s ease,
+                                box-shadow .15s ease !important;
+                }
+                button[data-testid="stPopoverButton"]:hover {
+                    transform: translateY(-2px) scale(1.05) !important;
+                    box-shadow: 0 10px 24px rgba(0,0,0,.40) !important;
+                }
+                button[data-testid="stPopoverButton"]:active {
+                    transform: translateY(0) scale(1) !important;
+                }
+
+                /* Popover panel — float above all content */
+                div[data-testid="stPopoverBody"] {
+                    z-index: 100000 !important;
+                    max-width: 480px !important;
+                    max-height: 70vh !important;
+                    overflow-y: auto !important;
+                }
+            `;
+            p.head.appendChild(style);
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -98,30 +174,6 @@ max_rows_to_visualize = st.sidebar.slider(
 )
 
 # ---------------------------------------------------------------------------
-# AI settings
-# ---------------------------------------------------------------------------
-
-st.sidebar.header("AI interpretation (Groq)")
-
-with st.sidebar.expander("Groq API key", expanded=False):
-    st.caption(
-        "Get a free key at [console.groq.com](https://console.groq.com). "
-        "You can also set `GROQ_API_KEY` in `.streamlit/secrets.toml`."
-    )
-
-    typed_key = st.text_input(
-        "Groq API key",
-        type="password",
-        key="groq_api_key_input",
-        placeholder="gsk_...",
-    )
-
-    # Stash in session_state so ai_interpreter.get_groq_client() can find it
-    # (it checks session_state first, then st.secrets).
-    if typed_key:
-        st.session_state["GROQ_API_KEY"] = typed_key
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -137,16 +189,6 @@ def keep_genes_with_min_snps(
     valid_genes = snp_counts[snp_counts >= min_snps].index
 
     return df[df["gene"].isin(valid_genes)].reset_index(drop=True)
-
-
-def get_active_api_key() -> str:
-    typed = st.session_state.get("GROQ_API_KEY", "") or ""
-    if typed:
-        return typed
-    try:
-        return st.secrets.get("GROQ_API_KEY", "")  # type: ignore[attr-defined]
-    except Exception:
-        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -263,198 +305,244 @@ if "graph" in st.session_state:
     )
 
     # -----------------------------------------------------------------------
-    # AI INTERPRETATION SECTION
+    # AI INTERPRETATION SECTION — rendered inside a floating popover that
+    # opens when the user clicks the 🤖 robot button. The Groq API key is
+    # configured in `src/config.py` (or via the GROQ_API_KEY env var), not
+    # typed into the web app.
     # -----------------------------------------------------------------------
 
-    st.divider()
-    st.subheader("🤖 AI interpretation (Groq)")
-
-    api_key = get_active_api_key()
-    if not api_key:
-        st.info(
-            "Add a Groq API key in the sidebar to enable AI features. "
-            "Get one free at [console.groq.com](https://console.groq.com)."
+    # Render the robot trigger button. CSS above makes it position:fixed
+    # so it always floats at the bottom-right corner regardless of scroll.
+    with st.popover(
+        "🤖",
+        help="Open the AI assistant",
+        use_container_width=False,
+    ):
+        st.markdown("### 🤖 AI Assistant")
+        st.caption(
+            "Powered by Groq. API key is configured in `src/config.py`."
         )
-    else:
-        # Build the shared context once per graph run.
-        if "ai_context" not in st.session_state:
-            st.session_state["ai_context"] = ai_interpreter.build_network_context(
-                G,
-                summary,
-                top_genes_df,
-                top_hub_variants=top_variants_df,
-                top_diseases=top_diseases_df,
-                filtered_df=filtered_df,
+
+        api_key = get_groq_api_key()
+        if not api_key:
+            st.info(
+                "No Groq API key configured. Set `GROQ_API_KEY` in "
+                "`src/config.py` or as an environment variable, then "
+                "rebuild the network. Get a free key at "
+                "[console.groq.com](https://console.groq.com)."
             )
-
-        network_context = st.session_state["ai_context"]
-        client = ai_interpreter.get_groq_client(api_key)
-
-        if client is None:
-            ai_interpreter.ai_unavailable_message()
         else:
-            tab_interpret, tab_genes, tab_chat, tab_report = st.tabs([
-                "🧠 Interpret network",
-                "🧬 Explain a gene",
-                "💬 Ask the network",
-                "📄 Generate report",
-            ])
-
-            # ---- Tab 1: Interpret the network -----------------------------
-            with tab_interpret:
-                st.caption(
-                    "Plain-English narrative of the network structure, hub "
-                    "biology, and caveats. Generated by an LLM — verify "
-                    "specific gene/variant claims with NCBI Gene, Ensembl, "
-                    "or OpenTargets."
-                )
-
-                if st.button("✨ Generate interpretation", key="btn_interpret"):
-                    with st.spinner("Interpreting network…"):
-                        st.session_state["ai_interpretation"] = (
-                            ai_interpreter.render_network_interpretation(
-                                client,
-                                network_context,
-                                trait_hint=trait_hint,
-                            )
-                        )
-
-                if st.session_state.get("ai_interpretation"):
-                    st.markdown("#### Interpretation")
-                    st.markdown(st.session_state["ai_interpretation"])
-
-            # ---- Tab 2: Explain a single gene ----------------------------
-            with tab_genes:
-                st.caption(
-                    "Pick a hub gene (or type any gene symbol) and the LLM "
-                    "will explain its function and why it might be a hub."
-                )
-
-                if top_genes_df is not None and not top_genes_df.empty:
-                    gene_options = top_genes_df["gene"].tolist()
-                else:
-                    gene_options = []
-
-                col_a, col_b = st.columns([2, 1])
-                with col_a:
-                    selected_gene = st.selectbox(
-                        "Hub gene",
-                        options=gene_options if gene_options else [""],
-                        disabled=not gene_options,
+            # Build the shared context once per graph run.
+            if "ai_context" not in st.session_state:
+                st.session_state["ai_context"] = (
+                    ai_interpreter.build_network_context(
+                        G,
+                        summary,
+                        top_genes_df,
+                        top_hub_variants=top_variants_df,
+                        top_diseases=top_diseases_df,
+                        filtered_df=filtered_df,
                     )
-                with col_b:
-                    custom_gene = st.text_input(
-                        "…or type another",
-                        placeholder="e.g. BRCA1",
+                )
+
+            network_context = st.session_state["ai_context"]
+            client = ai_interpreter.get_groq_client(api_key)
+
+            if client is None:
+                ai_interpreter.ai_unavailable_message()
+            else:
+                tab_interpret, tab_genes, tab_chat, tab_report = st.tabs([
+                    "🧠 Interpret",
+                    "🧬 Gene",
+                    "💬 Chat",
+                    "📄 Report",
+                ])
+
+                # ---- Tab 1: Interpret the network ---------------------
+                with tab_interpret:
+                    st.caption(
+                        "Plain-English narrative of the network "
+                        "structure, hub biology, and caveats. Generated "
+                        "by an LLM — verify specific gene/variant "
+                        "claims with NCBI Gene, Ensembl, or OpenTargets."
                     )
 
-                gene_to_explain = custom_gene.strip().upper() or selected_gene
-
-                if st.button("🔍 Explain gene", key="btn_explain_gene"):
-                    if not gene_to_explain:
-                        st.warning("Pick or type a gene symbol first.")
-                    else:
-                        with st.spinner(f"Looking up {gene_to_explain}…"):
-                            explanation = ai_interpreter.render_gene_explanation(
-                                client,
-                                gene_to_explain,
-                                network_context,
-                            )
-                            st.session_state.setdefault(
-                                "ai_gene_cache", {},
-                            )[gene_to_explain] = explanation
-
-                cache = st.session_state.get("ai_gene_cache", {})
-                if gene_to_explain and gene_to_explain in cache:
-                    st.markdown(f"#### {gene_to_explain}")
-                    st.markdown(cache[gene_to_explain])
-
-            # ---- Tab 3: Chat with the network ----------------------------
-            with tab_chat:
-                st.caption(
-                    "Ask free-form questions about the network. The LLM is "
-                    "grounded in the network stats above but may still get "
-                    "specific biology wrong — verify before publishing."
-                )
-
-                st.session_state.setdefault("ai_chat_history", [])
-
-                # Render prior turns.
-                for turn in st.session_state["ai_chat_history"]:
-                    with st.chat_message(turn["role"]):
-                        st.markdown(turn["content"])
-
-                user_msg = st.chat_input(
-                    "e.g. Which gene links the most diseases?",
-                    key="ai_chat_input",
-                )
-
-                if user_msg:
-                    st.session_state["ai_chat_history"].append(
-                        {"role": "user", "content": user_msg},
-                    )
-                    with st.chat_message("user"):
-                        st.markdown(user_msg)
-
-                    with st.chat_message("assistant"):
-                        prior = st.session_state["ai_chat_history"][:-1]
-                        pieces = []
-                        gen = ai_interpreter.answer_network_question(
-                            client,
-                            prior,
-                            user_msg,
-                            network_context,
-                        )
-                        for piece in gen:
-                            pieces.append(piece)
-                        full_answer = "".join(pieces)
-                        st.markdown(full_answer)
-
-                    st.session_state["ai_chat_history"].append(
-                        {"role": "assistant", "content": full_answer},
-                    )
-
-                    if len(st.session_state["ai_chat_history"]) > 20:
-                        st.session_state["ai_chat_history"] = (
-                            st.session_state["ai_chat_history"][-20:]
-                        )
-
-                if st.session_state["ai_chat_history"]:
-                    if st.button("Clear chat", key="btn_clear_chat"):
-                        st.session_state["ai_chat_history"] = []
-                        st.rerun()
-
-            # ---- Tab 4: Generate markdown report -------------------------
-            with tab_report:
-                st.caption(
-                    "Generate a markdown report you can download and share. "
-                    "Useful for notetaking or as a first draft of a "
-                    "discussion section."
-                )
-
-                if st.button("📝 Generate report", key="btn_report"):
-                    with st.spinner("Writing report…"):
-                        try:
-                            st.session_state["ai_report_text"] = (
-                                ai_interpreter.build_markdown_report(
+                    if st.button(
+                        "✨ Generate interpretation",
+                        key="btn_interpret",
+                    ):
+                        with st.spinner("Interpreting network…"):
+                            st.session_state["ai_interpretation"] = (
+                                ai_interpreter.render_network_interpretation(
                                     client,
                                     network_context,
                                     trait_hint=trait_hint,
                                 )
                             )
-                        except Exception as error:
-                            st.error(f"Report generation failed: {error}")
 
-                report_text = st.session_state.get("ai_report_text", "")
-                if report_text:
-                    st.markdown(report_text)
-                    st.download_button(
-                        label="⬇️ Download report (.md)",
-                        data=report_text.encode("utf-8"),
-                        file_name="gwas_network_report.md",
-                        mime="text/markdown",
-                        key="btn_download_report",
+                    if st.session_state.get("ai_interpretation"):
+                        st.markdown("#### Interpretation")
+                        st.markdown(
+                            st.session_state["ai_interpretation"]
+                        )
+
+                # ---- Tab 2: Explain a single gene ---------------------
+                with tab_genes:
+                    st.caption(
+                        "Pick a hub gene (or type any gene symbol) and "
+                        "the LLM will explain its function and why it "
+                        "might be a hub."
                     )
+
+                    if top_genes_df is not None and not top_genes_df.empty:
+                        gene_options = top_genes_df["gene"].tolist()
+                    else:
+                        gene_options = []
+
+                    col_a, col_b = st.columns([2, 1])
+                    with col_a:
+                        selected_gene = st.selectbox(
+                            "Hub gene",
+                            options=gene_options if gene_options else [""],
+                            disabled=not gene_options,
+                        )
+                    with col_b:
+                        custom_gene = st.text_input(
+                            "…or type another",
+                            placeholder="e.g. BRCA1",
+                        )
+
+                    gene_to_explain = (
+                        custom_gene.strip().upper() or selected_gene
+                    )
+
+                    if st.button(
+                        "🔍 Explain gene",
+                        key="btn_explain_gene",
+                    ):
+                        if not gene_to_explain:
+                            st.warning("Pick or type a gene symbol first.")
+                        else:
+                            with st.spinner(
+                                f"Looking up {gene_to_explain}…"
+                            ):
+                                explanation = (
+                                    ai_interpreter.render_gene_explanation(
+                                        client,
+                                        gene_to_explain,
+                                        network_context,
+                                    )
+                                )
+                                st.session_state.setdefault(
+                                    "ai_gene_cache", {},
+                                )[gene_to_explain] = explanation
+
+                    cache = st.session_state.get("ai_gene_cache", {})
+                    if gene_to_explain and gene_to_explain in cache:
+                        st.markdown(f"#### {gene_to_explain}")
+                        st.markdown(cache[gene_to_explain])
+
+                # ---- Tab 3: Chat with the network ---------------------
+                with tab_chat:
+                    st.caption(
+                        "Ask free-form questions about the network. "
+                        "The LLM is grounded in the network stats above "
+                        "but may still get specific biology wrong — "
+                        "verify before publishing."
+                    )
+
+                    st.session_state.setdefault("ai_chat_history", [])
+
+                    for turn in st.session_state["ai_chat_history"]:
+                        with st.chat_message(turn["role"]):
+                            st.markdown(turn["content"])
+
+                    user_msg = st.chat_input(
+                        "e.g. Which gene links the most diseases?",
+                        key="ai_chat_input",
+                    )
+
+                    if user_msg:
+                        st.session_state["ai_chat_history"].append(
+                            {"role": "user", "content": user_msg},
+                        )
+                        with st.chat_message("user"):
+                            st.markdown(user_msg)
+
+                        with st.chat_message("assistant"):
+                            prior = st.session_state[
+                                "ai_chat_history"
+                            ][:-1]
+                            pieces = []
+                            gen = ai_interpreter.answer_network_question(
+                                client,
+                                prior,
+                                user_msg,
+                                network_context,
+                            )
+                            for piece in gen:
+                                pieces.append(piece)
+                            full_answer = "".join(pieces)
+                            st.markdown(full_answer)
+
+                        st.session_state["ai_chat_history"].append(
+                            {
+                                "role": "assistant",
+                                "content": full_answer,
+                            },
+                        )
+
+                        if (
+                            len(st.session_state["ai_chat_history"])
+                            > 20
+                        ):
+                            st.session_state["ai_chat_history"] = (
+                                st.session_state["ai_chat_history"][-20:]
+                            )
+
+                    if st.session_state["ai_chat_history"]:
+                        if st.button(
+                            "Clear chat", key="btn_clear_chat"
+                        ):
+                            st.session_state["ai_chat_history"] = []
+                            st.rerun()
+
+                # ---- Tab 4: Generate markdown report ------------------
+                with tab_report:
+                    st.caption(
+                        "Generate a markdown report you can download "
+                        "and share. Useful for notetaking or as a "
+                        "first draft of a discussion section."
+                    )
+
+                    if st.button("📝 Generate report", key="btn_report"):
+                        with st.spinner("Writing report…"):
+                            try:
+                                st.session_state["ai_report_text"] = (
+                                    ai_interpreter.build_markdown_report(
+                                        client,
+                                        network_context,
+                                        trait_hint=trait_hint,
+                                    )
+                                )
+                            except Exception as error:
+                                st.error(
+                                    f"Report generation failed: {error}"
+                                )
+
+                    report_text = st.session_state.get(
+                        "ai_report_text", ""
+                    )
+                    if report_text:
+                        st.markdown(report_text)
+                        st.download_button(
+                            label="⬇️ Download report (.md)",
+                            data=report_text.encode("utf-8"),
+                            file_name="gwas_network_report.md",
+                            mime="text/markdown",
+                            key="btn_download_report",
+                        )
+
 
 else:
     st.info(

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from pathlib import Path
 
 
@@ -18,6 +19,35 @@ REPORTS_DIR = RESULTS_DIR / "reports"
 EXPORTS_DIR = RESULTS_DIR / "exports"
 
 CACHE_DIR = BASE_DIR / "cache"
+
+
+# ---------------------------------------------------------------------------
+# AI / GROQ SETTINGS
+#
+# Paste your Groq API key below (get one free at https://console.groq.com).
+# You can also set the GROQ_API_KEY environment variable — it takes
+# precedence over the value defined here.
+#
+# SECURITY: do NOT commit a real key to a public repo. If you push this
+# project to GitHub, keep this file local or load the key from an env var.
+# ---------------------------------------------------------------------------
+
+GROQ_API_KEY: str = "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"  # e.g. "gsk_..."
+
+GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+GROQ_MODEL_FAST: str = "llama-3.1-8b-instant"
+
+
+def get_groq_api_key() -> str:
+    """
+    Resolve the Groq API key from, in order of priority:
+      1. The GROQ_API_KEY environment variable (best for deployment)
+      2. The GROQ_API_KEY value defined in this config file
+    Returns an empty string if neither is set.
+    """
+
+    return os.environ.get("GROQ_API_KEY", "") or GROQ_API_KEY or ""
 
 
 # GWAS SETTINGS
