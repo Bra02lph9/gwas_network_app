@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from pathlib import Path
 import streamlit as st
 
@@ -18,6 +19,30 @@ EXPORTS_DIR = RESULTS_DIR / "exports"
 
 CACHE_DIR = BASE_DIR / "cache"
 
+<<<<<<< HEAD
+=======
+
+GROQ_API_KEY: str = ""  # e.g. "gsk_..."
+
+GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+GROQ_MODEL_FAST: str = "llama-3.1-8b-instant"
+
+
+def get_groq_api_key() -> str:
+    """
+    Resolve the Groq API key from, in order of priority:
+      1. The GROQ_API_KEY environment variable (best for deployment)
+      2. The GROQ_API_KEY value defined in this config file
+    Returns an empty string if neither is set.
+    """
+
+    return os.environ.get("GROQ_API_KEY", "") or GROQ_API_KEY or ""
+
+
+# GWAS SETTINGS
+
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
 GWAS_API_BASE_URL = "https://www.ebi.ac.uk/gwas/rest/api"
 
 DEFAULT_PVALUE_THRESHOLD = 5e-8

@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+<<<<<<< HEAD
 from typing import Generator
+=======
+import os
+from typing import Any, Generator
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
 
 import pandas as pd
 import streamlit as st
+
+from src.config import (
+    GROQ_API_KEY,
+    GROQ_MODEL,
+    GROQ_MODEL_FAST,
+    get_groq_api_key,
+)
 
 try:
     from groq import Groq
@@ -11,8 +23,21 @@ except ImportError:
     Groq = None
 
 
+<<<<<<< HEAD
 DEFAULT_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_FAST_MODEL = "llama-3.1-8b-instant"
+=======
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+# Default models. Override by setting GROQ_MODEL / GROQ_MODEL_FAST in
+# src/config.py or via the GROQ_MODEL / GROQ_MODEL_FAST environment vars.
+DEFAULT_MODEL = GROQ_MODEL
+
+# Quick / cheap model for short tasks like single-gene blurbs.
+DEFAULT_FAST_MODEL = GROQ_MODEL_FAST
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
 
 MAX_HUB_GENES_IN_PROMPT = 15
 MAX_HUB_VARIANTS_IN_PROMPT = 10
@@ -31,14 +56,32 @@ SYSTEM_DISCLAIMER = (
 )
 
 
+<<<<<<< HEAD
 def get_groq_client(api_key: str | None) -> Groq | None:
     """
     Create Groq client from sidebar, session state, or Streamlit secrets.
+=======
+# ---------------------------------------------------------------------------
+# Client
+# ---------------------------------------------------------------------------
+
+
+def get_groq_client(api_key: str | None = None) -> Groq | None:
+    """
+    Build a Groq client. Returns None if the key is missing or the library
+    isn't installed, so the UI can fall back gracefully.
+
+    Key resolution order:
+      1. Explicit `api_key` argument (if provided)
+      2. GROQ_API_KEY environment variable
+      3. GROQ_API_KEY in src/config.py
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
     """
 
     if Groq is None:
         return None
 
+<<<<<<< HEAD
     key = api_key or ""
 
     if not key:
@@ -49,6 +92,9 @@ def get_groq_client(api_key: str | None) -> Groq | None:
             key = st.secrets.get("GROQ_API_KEY", "")
         except Exception:
             key = ""
+=======
+    key = api_key or get_groq_api_key()
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
 
     if not key:
         return None
@@ -58,11 +104,17 @@ def get_groq_client(api_key: str | None) -> Groq | None:
 
 def get_model_name(fast: bool = False) -> str:
     """
+<<<<<<< HEAD
     Resolve Groq model name from session state, secrets, or defaults.
+=======
+    Resolve model name from env var, then config, else use default.
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
     """
 
-    key = "GROQ_MODEL_FAST" if fast else "GROQ_MODEL"
+    env_key = "GROQ_MODEL_FAST" if fast else "GROQ_MODEL"
+    default = DEFAULT_FAST_MODEL if fast else DEFAULT_MODEL
 
+<<<<<<< HEAD
     value = st.session_state.get(key, "") or ""
 
     if not value:
@@ -72,6 +124,9 @@ def get_model_name(fast: bool = False) -> str:
             value = ""
 
     return value or (DEFAULT_FAST_MODEL if fast else DEFAULT_MODEL)
+=======
+    return os.environ.get(env_key, "") or default
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
 
 
 def _format_metrics_df(
@@ -395,14 +450,25 @@ def ai_unavailable_message() -> None:
     """
 
     st.info(
+<<<<<<< HEAD
         "AI interpretation is unavailable. Add a Groq API key in the sidebar "
         "or set GROQ_API_KEY in `.streamlit/secrets.toml`."
+=======
+        "🤖 AI interpretation is unavailable. Set your Groq API key in "
+        "`src/config.py` (or as the `GROQ_API_KEY` environment variable) "
+        "and rebuild the network."
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
     )
 
 
 def check_ai_available() -> tuple[bool, str]:
     """
+<<<<<<< HEAD
     Check if Groq package and API key are available.
+=======
+    Return (ok, message). `ok` is True only if the groq library is installed
+    AND a key is available (env var or config).
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
     """
 
     if Groq is None:
@@ -411,9 +477,10 @@ def check_ai_available() -> tuple[bool, str]:
             "Run `pip install groq` to enable AI features."
         )
 
-    key = st.session_state.get("GROQ_API_KEY", "") or ""
+    key = get_groq_api_key()
 
     if not key:
+<<<<<<< HEAD
         try:
             key = st.secrets.get("GROQ_API_KEY", "")
         except Exception:
@@ -421,5 +488,11 @@ def check_ai_available() -> tuple[bool, str]:
 
     if not key:
         return False, "No Groq API key found in secrets or sidebar."
+=======
+        return False, (
+            "No Groq API key found. Set `GROQ_API_KEY` in `src/config.py` "
+            "or as an environment variable."
+        )
+>>>>>>> e15f54a2b5abd53396b25f22282ef45f72f14a7d
 
     return True, "ok"
