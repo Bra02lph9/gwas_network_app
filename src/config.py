@@ -21,18 +21,7 @@ EXPORTS_DIR = RESULTS_DIR / "exports"
 CACHE_DIR = BASE_DIR / "cache"
 
 
-# ---------------------------------------------------------------------------
-# AI / GROQ SETTINGS
-#
-# Paste your Groq API key below (get one free at https://console.groq.com).
-# You can also set the GROQ_API_KEY environment variable — it takes
-# precedence over the value defined here.
-#
-# SECURITY: do NOT commit a real key to a public repo. If you push this
-# project to GitHub, keep this file local or load the key from an env var.
-# ---------------------------------------------------------------------------
-
-GROQ_API_KEY: str = "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"  # e.g. "gsk_..."
+GROQ_API_KEY: str = ""  # e.g. "gsk_..."
 
 GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
